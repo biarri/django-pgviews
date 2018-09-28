@@ -65,7 +65,7 @@ models.signals.class_prepared.connect(realize_deferred_projections)
 
 
 def create_view(connection, view_name, view_query, update=True, force=False,
-        materialized=False, index=None):
+        materialized=False, index=None, column_indexes=None):
     """
     Create a named view on a connection.
 
@@ -114,6 +114,9 @@ def create_view(connection, view_name, view_query, update=True, force=False,
                 index_sub_name = '_'.join([s.strip() for s in index.split(',')])
                 cursor.execute('CREATE UNIQUE INDEX {0}_{1}_index ON {0} ({2})'.format(
                     view_name, index_sub_name, index))
+            if column_indexes is not None:
+                for column in column_indexes:
+                    cursor.execute('CREATE INDEX {0}_{1}_index ON {0} ({1})'.format(view_name, column))
             ret = view_exists and 'UPDATED' or 'CREATED'
         elif not force_required:
             cursor.execute('CREATE OR REPLACE VIEW {0} AS {1};'.format(view_name, view_query))
@@ -154,6 +157,7 @@ class ViewMeta(models.base.ModelBase):
         dependencies = attrs.pop('dependencies', [])
         projection = attrs.pop('projection', [])
         concurrent_index = attrs.pop('concurrent_index',None)
+        column_indexes = attrs.pop('column_indexes', None)
 
         # Get projection
         deferred_projections = []
@@ -176,6 +180,8 @@ class ViewMeta(models.base.ModelBase):
         setattr(view_cls, '_dependencies', dependencies)
         # Materialized views can have an index allowing concurrent refresh
         setattr(view_cls, '_concurrent_index', concurrent_index)
+        # Materialized views can also have regular column indexes allowing fast querying
+        setattr(view_cls, '_column_indexes', column_indexes)
         for app_label, model_name, field_name in deferred_projections:
             model_spec = (app_label, model_name.lower())
 

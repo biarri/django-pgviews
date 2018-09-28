@@ -53,7 +53,7 @@ class ViewSyncer(object):
                 status = create_view(connection, view_cls._meta.db_table,
                         view_cls.sql, update=update, force=force,
                         materialized=isinstance(view_cls(), MaterializedView),
-                        index=view_cls._concurrent_index)
+                        index=view_cls._concurrent_index, column_indexes=view_cls._column_indexes)
                 view_synced.send(
                     sender=view_cls, update=update, force=force, status=status,
                     has_changed=status not in ('EXISTS', 'FORCE_REQUIRED'))
