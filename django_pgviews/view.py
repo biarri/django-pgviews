@@ -17,12 +17,10 @@ import psycopg2
 from django_pgviews.db import get_fields_by_name
 
 
-FIELD_SPEC_REGEX = (r'^([A-Za-z_][A-Za-z0-9_]*)\.'
-                    r'([A-Za-z_][A-Za-z0-9_]*)\.'
-                    r'(\*|(?:[A-Za-z_][A-Za-z0-9_]*))$')
+FIELD_SPEC_REGEX = r"^([A-Za-z_][A-Za-z0-9_]*)\." r"([A-Za-z_][A-Za-z0-9_]*)\." r"(\*|(?:[A-Za-z_][A-Za-z0-9_]*))$"
 FIELD_SPEC_RE = re.compile(FIELD_SPEC_REGEX)
 
-log = logging.getLogger('django_pgviews.view')
+log = logging.getLogger("django_pgviews.view")
 
 
 def hasfield(model_cls, field_name):
@@ -44,8 +42,7 @@ def hasfield(model_cls, field_name):
 # Projections of models fields onto views which have been deferred due to
 # model import and loading dependencies.
 # Format: (app_label, model_name): {view_cls: [field_name, ...]}
-_DEFERRED_PROJECTIONS = collections.defaultdict(
-    lambda: collections.defaultdict(list))
+_DEFERRED_PROJECTIONS = collections.defaultdict(lambda: collections.defaultdict(list))
 
 
 def realize_deferred_projections(sender, *args, **kwargs):
@@ -61,11 +58,22 @@ def realize_deferred_projections(sender, *args, **kwargs):
             if hasattr(view_cls, name) or hasfield(view_cls, name):
                 continue
             copy.copy(field).contribute_to_class(view_cls, name)
+
+
 models.signals.class_prepared.connect(realize_deferred_projections)
 
 
-def create_view(connection, view_name, view_query, update=True, force=False,
-        materialized=False, index=None, column_indexes=None, tenant_schema=None):
+def create_view(
+    connection,
+    view_name,
+    view_query,
+    update=True,
+    force=False,
+    materialized=False,
+    index=None,
+    column_indexes=None,
+    tenant_schema=None,
+):
     """
     Create a named view on a connection.
 
@@ -78,14 +86,13 @@ def create_view(connection, view_name, view_query, update=True, force=False,
     the new one.
     """
 
-    if '.' in view_name:
-        vschema, vname = view_name.split('.', 1)
+    if "." in view_name:
+        vschema, vname = view_name.split(".", 1)
     else:
         if tenant_schema is None:
-            vschema, vname = 'public', view_name
+            vschema, vname = "public", view_name
         else:
             vschema, vname = tenant_schema, view_name
-
 
     cursor_wrapper = connection.cursor()
     cursor = cursor_wrapper.cursor
@@ -93,44 +100,45 @@ def create_view(connection, view_name, view_query, update=True, force=False,
         force_required = False
         # Determine if view already exists.
         cursor.execute(
-            'SELECT COUNT(*) FROM information_schema.views WHERE table_schema = %s and table_name = %s;',
-            [vschema, vname]
+            "SELECT COUNT(*) FROM information_schema.views WHERE table_schema = %s and table_name = %s;",
+            [vschema, vname],
         )
         view_exists = cursor.fetchone()[0] > 0
         if view_exists and not update:
-            return 'EXISTS'
+            return "EXISTS"
         elif view_exists:
             # Detect schema conflict by copying the original view, attempting to
             # update this copy, and detecting errors.
-            cursor.execute('CREATE TEMPORARY VIEW check_conflict AS SELECT * FROM {0};'.format(view_name))
+            cursor.execute("CREATE TEMPORARY VIEW check_conflict AS SELECT * FROM {0};".format(view_name))
             try:
-                cursor.execute('CREATE OR REPLACE TEMPORARY VIEW check_conflict AS {0};'.format(view_query))
+                cursor.execute("CREATE OR REPLACE TEMPORARY VIEW check_conflict AS {0};".format(view_query))
             except psycopg2.ProgrammingError:
                 force_required = True
                 cursor.connection.rollback()
             finally:
-                cursor.execute('DROP VIEW IF EXISTS check_conflict;')
+                cursor.execute("DROP VIEW IF EXISTS check_conflict;")
 
         if materialized:
-            cursor.execute('DROP MATERIALIZED VIEW IF EXISTS {0} CASCADE;'.format(view_name))
-            cursor.execute('CREATE MATERIALIZED VIEW {0} AS {1};'.format(view_name, view_query))
+            cursor.execute("DROP MATERIALIZED VIEW IF EXISTS {0} CASCADE;".format(view_name))
+            cursor.execute("CREATE MATERIALIZED VIEW {0} AS {1};".format(view_name, view_query))
             if index is not None:
-                index_sub_name = '_'.join([s.strip() for s in index.split(',')])
-                cursor.execute('CREATE UNIQUE INDEX {0}_{1}_index ON {0} ({2})'.format(
-                    view_name, index_sub_name, index))
+                index_sub_name = "_".join([s.strip() for s in index.split(",")])
+                cursor.execute(
+                    "CREATE UNIQUE INDEX {0}_{1}_index ON {0} ({2})".format(view_name, index_sub_name, index)
+                )
             if column_indexes is not None:
                 for column in column_indexes:
-                    cursor.execute('CREATE INDEX {0}_{1}_index ON {0} ({1})'.format(view_name, column))
-            ret = view_exists and 'UPDATED' or 'CREATED'
+                    cursor.execute("CREATE INDEX {0}_{1}_index ON {0} ({1})".format(view_name, column))
+            ret = view_exists and "UPDATED" or "CREATED"
         elif not force_required:
-            cursor.execute('CREATE OR REPLACE VIEW {0} AS {1};'.format(view_name, view_query))
-            ret = view_exists and 'UPDATED' or 'CREATED'
+            cursor.execute("CREATE OR REPLACE VIEW {0} AS {1};".format(view_name, view_query))
+            ret = view_exists and "UPDATED" or "CREATED"
         elif force:
-            cursor.execute('DROP VIEW IF EXISTS {0} CASCADE;'.format(view_name))
-            cursor.execute('CREATE VIEW {0} AS {1};'.format(view_name, view_query))
-            ret = 'FORCED'
+            cursor.execute("DROP VIEW IF EXISTS {0} CASCADE;".format(view_name))
+            cursor.execute("CREATE VIEW {0} AS {1};".format(view_name, view_query))
+            ret = "FORCED"
         else:
-            ret = 'FORCE_REQUIRED'
+            ret = "FORCE_REQUIRED"
 
         return ret
     finally:
@@ -145,12 +153,12 @@ def clear_view(connection, view_name, materialized=False):
     cursor = cursor_wrapper.cursor
     try:
         if materialized:
-            cursor.execute('DROP MATERIALIZED VIEW IF EXISTS {0} CASCADE'.format(view_name))
+            cursor.execute("DROP MATERIALIZED VIEW IF EXISTS {0} CASCADE".format(view_name))
         else:
-            cursor.execute('DROP VIEW IF EXISTS {0} CASCADE'.format(view_name))
+            cursor.execute("DROP VIEW IF EXISTS {0} CASCADE".format(view_name))
     finally:
         cursor_wrapper.close()
-    return u'DROPPED'.format(view=view_name)
+    return u"DROPPED".format(view=view_name)
 
 
 class ViewMeta(models.base.ModelBase):
@@ -158,10 +166,10 @@ class ViewMeta(models.base.ModelBase):
         """Deal with all of the meta attributes, removing any Django does not want
         """
         # Get attributes before Django
-        dependencies = attrs.pop('dependencies', [])
-        projection = attrs.pop('projection', [])
-        concurrent_index = attrs.pop('concurrent_index',None)
-        column_indexes = attrs.pop('column_indexes', None)
+        dependencies = attrs.pop("dependencies", [])
+        projection = attrs.pop("projection", [])
+        concurrent_index = attrs.pop("concurrent_index", None)
+        column_indexes = attrs.pop("column_indexes", None)
 
         # Get projection
         deferred_projections = []
@@ -171,21 +179,19 @@ class ViewMeta(models.base.ModelBase):
             elif isinstance(field_name, six.string_types):
                 match = FIELD_SPEC_RE.match(field_name)
                 if not match:
-                    raise TypeError("Unrecognized field specifier: %r" %
-                                    field_name)
+                    raise TypeError("Unrecognized field specifier: %r" % field_name)
                 deferred_projections.append(match.groups())
             else:
-                raise TypeError("Unrecognized field specifier: %r" %
-                                field_name)
+                raise TypeError("Unrecognized field specifier: %r" % field_name)
 
         view_cls = models.base.ModelBase.__new__(metacls, name, bases, attrs)
 
         # Get dependencies
-        setattr(view_cls, '_dependencies', dependencies)
+        setattr(view_cls, "_dependencies", dependencies)
         # Materialized views can have an index allowing concurrent refresh
-        setattr(view_cls, '_concurrent_index', concurrent_index)
+        setattr(view_cls, "_concurrent_index", concurrent_index)
         # Materialized views can also have regular column indexes allowing fast querying
-        setattr(view_cls, '_column_indexes', column_indexes)
+        setattr(view_cls, "_column_indexes", column_indexes)
         for app_label, model_name, field_name in deferred_projections:
             model_spec = (app_label, model_name.lower())
 
@@ -195,15 +201,17 @@ class ViewMeta(models.base.ModelBase):
         return view_cls
 
     def add_to_class(self, name, value):
-        if django.VERSION >= (1, 10) and name == '_base_manager':
+        if django.VERSION >= (1, 10) and name == "_base_manager":
             return
         super(ViewMeta, self).add_to_class(name, value)
 
 
-
 if django.VERSION >= (1, 10):
+
     class BaseManagerMeta:
-        base_manager_name = 'objects'
+        base_manager_name = "objects"
+
+
 else:
     BaseManagerMeta = object
 
@@ -211,6 +219,7 @@ else:
 class View(six.with_metaclass(ViewMeta, models.Model)):
     """Helper for exposing Postgres views as Django models.
     """
+
     _deferred = False
 
     class Meta:
@@ -261,6 +270,7 @@ class ReadOnlyViewManager(models.Manager):
 class ReadOnlyView(View):
     """View which cannot be altered
     """
+
     _base_manager = ReadOnlyViewManager()
     objects = ReadOnlyViewManager()
 
@@ -274,17 +284,16 @@ class MaterializedView(View):
     More information:
     http://www.postgresql.org/docs/current/static/sql-creatematerializedview.html
     """
+
     @classmethod
     def refresh(self, concurrently=False):
         cursor_wrapper = connection.cursor()
         cursor = cursor_wrapper.cursor
         try:
             if self._concurrent_index is not None and concurrently:
-                cursor.execute('REFRESH MATERIALIZED VIEW CONCURRENTLY {0}'.format(
-                    self._meta.db_table))
+                cursor.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY {0}".format(self._meta.db_table))
             else:
-                cursor.execute('REFRESH MATERIALIZED VIEW {0}'.format(
-                    self._meta.db_table))
+                cursor.execute("REFRESH MATERIALIZED VIEW {0}".format(self._meta.db_table))
         finally:
             cursor_wrapper.close()
 
@@ -296,6 +305,7 @@ class MaterializedView(View):
 class ReadOnlyMaterializedView(MaterializedView):
     """Read-only version of the materialized view
     """
+
     _base_manager = ReadOnlyViewManager()
     objects = ReadOnlyViewManager()
 
