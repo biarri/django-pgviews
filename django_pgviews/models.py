@@ -60,11 +60,21 @@ class ViewSyncer(object):
                 else:
                     tenants = ['public']
                 for tenant in tenants:
+                    try:
+                        connection.set_schema(tenant)
+                        log.info('Switched to %s schema for %s', tenant, view_cls._meta.db_table)
+                    except:
+                        pass
                     status = create_view(connection, view_cls._meta.db_table,
                             view_cls.sql, update=update, force=force,
                             materialized=isinstance(view_cls(), MaterializedView),
                             index=view_cls._concurrent_index, column_indexes=view_cls._column_indexes,
                             tenant_schema=tenant)
+                    try:
+                        connection.set_schema_to_public()
+                    except:
+                        pass
+
                 view_synced.send(
                     sender=view_cls, update=update, force=force, status=status,
                     has_changed=status not in ('EXISTS', 'FORCE_REQUIRED'))
