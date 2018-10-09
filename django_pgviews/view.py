@@ -65,7 +65,7 @@ models.signals.class_prepared.connect(realize_deferred_projections)
 
 
 def create_view(connection, view_name, view_query, update=True, force=False,
-        materialized=False, index=None, column_indexes=None):
+        materialized=False, index=None, column_indexes=None, tenant_schema=None):
     """
     Create a named view on a connection.
 
@@ -81,7 +81,11 @@ def create_view(connection, view_name, view_query, update=True, force=False,
     if '.' in view_name:
         vschema, vname = view_name.split('.', 1)
     else:
-        vschema, vname = 'public', view_name
+        if tenant_schema is None:
+            vschema, vname = 'public', view_name
+        else:
+            vschema, vname = tenant_schema, view_name
+
 
     cursor_wrapper = connection.cursor()
     cursor = cursor_wrapper.cursor

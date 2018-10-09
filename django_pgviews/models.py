@@ -1,6 +1,8 @@
 import logging
 
 from django.apps import apps
+from django.conf import settings
+from django.contrib.contenttypes.models import ContentType
 from django.db import connection
 
 from django_pgviews.view import create_view, View, MaterializedView
@@ -25,7 +27,7 @@ class ViewSyncer(object):
             backlog = self.run_backlog(backlog, force, update)
 
         if loop >= 10:
-            log.warn('pgviews dependencies hit limit. Check if your model dependencies are correct')
+            log.warning('pgviews dependencies hit limit. Check if your model dependencies are correct')
         else:
             all_views_synced.send(sender=None)
 
@@ -50,10 +52,19 @@ class ViewSyncer(object):
                 continue # Skip
 
             try:
-                status = create_view(connection, view_cls._meta.db_table,
-                        view_cls.sql, update=update, force=force,
-                        materialized=isinstance(view_cls(), MaterializedView),
-                        index=view_cls._concurrent_index, column_indexes=view_cls._column_indexes)
+                app_label = ContentType.objects.get_for_model(view_cls).app_label
+                if hasattr(settings, 'TENANT_APPS') and app_label in settings.TENANT_APPS:
+                    from tenant_schemas.utils import get_public_schema_name, get_tenant_model, schema_exists
+                    tenants = get_tenant_model().objects.exclude(schema_name=get_public_schema_name()).values_list(
+                        'schema_name', flat=True)
+                else:
+                    tenants = ['public']
+                for tenant in tenants:
+                    status = create_view(connection, view_cls._meta.db_table,
+                            view_cls.sql, update=update, force=force,
+                            materialized=isinstance(view_cls(), MaterializedView),
+                            index=view_cls._concurrent_index, column_indexes=view_cls._column_indexes,
+                            tenant_schema=tenant)
                 view_synced.send(
                     sender=view_cls, update=update, force=force, status=status,
                     has_changed=status not in ('EXISTS', 'FORCE_REQUIRED'))
