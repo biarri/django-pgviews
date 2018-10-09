@@ -66,7 +66,7 @@ class ViewSyncer(object):
                     except:
                         pass
                     status = create_view(connection, view_cls._meta.db_table,
-                            view_cls.sql, update=update, force=force,
+                            view_cls.sql.format(tenant=tenant), update=update, force=force,
                             materialized=isinstance(view_cls(), MaterializedView),
                             index=view_cls._concurrent_index, column_indexes=view_cls._column_indexes,
                             tenant_schema=tenant)
