@@ -62,6 +62,7 @@ class ViewSyncer(object):
                     )
                 else:
                     tenants = ["public"]
+                status = "EXISTS"
                 for tenant in tenants:
                     try:
                         connection.set_schema(tenant)
