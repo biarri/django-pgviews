@@ -6,16 +6,14 @@ import logging
 import re
 
 import django
-from django.core import exceptions
-from django.db import connection
-from django.db.models.query import QuerySet
-from django.db import models
-from django.utils import six
-from django.apps import apps
 import psycopg2
+from django.apps import apps
+from django.core import exceptions
+from django.db import connection, models
+from django.db.models.query import QuerySet
+from django.utils import six
 
 from django_pgviews.db import get_fields_by_name
-
 
 FIELD_SPEC_REGEX = r"^([A-Za-z_][A-Za-z0-9_]*)\." r"([A-Za-z_][A-Za-z0-9_]*)\." r"(\*|(?:[A-Za-z_][A-Za-z0-9_]*))$"
 FIELD_SPEC_RE = re.compile(FIELD_SPEC_REGEX)
@@ -73,6 +71,8 @@ def create_view(
     index=None,
     column_indexes=None,
     tenant_schema=None,
+    is_function=False,
+    function_signature="",
 ):
     """
     Create a named view on a connection.
@@ -99,46 +99,55 @@ def create_view(
     try:
         force_required = False
         # Determine if view already exists.
-        cursor.execute(
-            "SELECT COUNT(*) FROM information_schema.views WHERE table_schema = %s and table_name = %s;",
-            [vschema, vname],
-        )
-        view_exists = cursor.fetchone()[0] > 0
-        if view_exists and not update:
-            return "EXISTS"
-        elif view_exists:
-            # Detect schema conflict by copying the original view, attempting to
-            # update this copy, and detecting errors.
-            cursor.execute("CREATE TEMPORARY VIEW check_conflict AS SELECT * FROM {0};".format(view_name))
-            try:
-                cursor.execute("CREATE OR REPLACE TEMPORARY VIEW check_conflict AS {0};".format(view_query))
-            except psycopg2.ProgrammingError:
-                force_required = True
-                cursor.connection.rollback()
-            finally:
-                cursor.execute("DROP VIEW IF EXISTS check_conflict;")
-
-        if materialized:
-            cursor.execute("DROP MATERIALIZED VIEW IF EXISTS {0} CASCADE;".format(view_name))
-            cursor.execute("CREATE MATERIALIZED VIEW {0} AS {1};".format(view_name, view_query))
-            if index is not None:
-                index_sub_name = "_".join([s.strip() for s in index.split(",")])
-                cursor.execute(
-                    "CREATE UNIQUE INDEX {0}_{1}_index ON {0} ({2})".format(view_name, index_sub_name, index)
+        if is_function:
+            cursor.execute(
+                "DROP FUNCTION IF EXISTS {vtenant}.{vname}({vargs})".format(
+                    vtenant=vschema, vname=vname, vargs=function_signature
                 )
-            if column_indexes is not None:
-                for column in column_indexes:
-                    cursor.execute("CREATE INDEX {0}_{1}_index ON {0} ({1})".format(view_name, column))
-            ret = view_exists and "UPDATED" or "CREATED"
-        elif not force_required:
-            cursor.execute("CREATE OR REPLACE VIEW {0} AS {1};".format(view_name, view_query))
-            ret = view_exists and "UPDATED" or "CREATED"
-        elif force:
-            cursor.execute("DROP VIEW IF EXISTS {0} CASCADE;".format(view_name))
-            cursor.execute("CREATE VIEW {0} AS {1};".format(view_name, view_query))
-            ret = "FORCED"
+            )
+            cursor.execute(view_query)
+            ret = "CREATED"
         else:
-            ret = "FORCE_REQUIRED"
+            cursor.execute(
+                "SELECT COUNT(*) FROM information_schema.views WHERE table_schema = %s AND table_name = %s;",
+                (vschema, vname),
+            )
+            view_exists = cursor.fetchone()[0] > 0
+            if view_exists and not update:
+                return "EXISTS"
+            elif view_exists:
+                # Detect schema conflict by copying the original view, attempting to
+                # update this copy, and detecting errors.
+                cursor.execute("CREATE TEMPORARY VIEW check_conflict AS SELECT * FROM {0};".format(view_name))
+                try:
+                    cursor.execute("CREATE OR REPLACE TEMPORARY VIEW check_conflict AS {0};".format(view_query))
+                except psycopg2.ProgrammingError:
+                    force_required = True
+                    cursor.connection.rollback()
+                finally:
+                    cursor.execute("DROP VIEW IF EXISTS check_conflict;")
+
+            if materialized:
+                cursor.execute("DROP MATERIALIZED VIEW IF EXISTS {0} CASCADE;".format(view_name))
+                cursor.execute("CREATE MATERIALIZED VIEW {0} AS {1};".format(view_name, view_query))
+                if index is not None:
+                    index_sub_name = "_".join([s.strip() for s in index.split(",")])
+                    cursor.execute(
+                        "CREATE UNIQUE INDEX {0}_{1}_index ON {0} ({2})".format(view_name, index_sub_name, index)
+                    )
+                if column_indexes is not None:
+                    for column in column_indexes:
+                        cursor.execute("CREATE INDEX {0}_{1}_index ON {0} ({1})".format(view_name, column))
+                ret = view_exists and "UPDATED" or "CREATED"
+            elif not force_required:
+                cursor.execute("CREATE OR REPLACE VIEW {0} AS {1};".format(view_name, view_query))
+                ret = view_exists and "UPDATED" or "CREATED"
+            elif force:
+                cursor.execute("DROP VIEW IF EXISTS {0} CASCADE;".format(view_name))
+                cursor.execute("CREATE VIEW {0} AS {1};".format(view_name, view_query))
+                ret = "FORCED"
+            else:
+                ret = "FORCE_REQUIRED"
 
         return ret
     finally:
@@ -170,6 +179,7 @@ class ViewMeta(models.base.ModelBase):
         projection = attrs.pop("projection", [])
         concurrent_index = attrs.pop("concurrent_index", None)
         column_indexes = attrs.pop("column_indexes", None)
+        function_signature = attrs.pop("function_signature", None)
 
         # Get projection
         deferred_projections = []
@@ -192,6 +202,7 @@ class ViewMeta(models.base.ModelBase):
         setattr(view_cls, "_concurrent_index", concurrent_index)
         # Materialized views can also have regular column indexes allowing fast querying
         setattr(view_cls, "_column_indexes", column_indexes)
+        setattr(view_cls, "_function_signature", function_signature)
         for app_label, model_name, field_name in deferred_projections:
             model_spec = (app_label, model_name.lower())
 
@@ -306,6 +317,15 @@ class ReadOnlyMaterializedView(MaterializedView):
     """Read-only version of the materialized view
     """
 
+    _base_manager = ReadOnlyViewManager()
+    objects = ReadOnlyViewManager()
+
+    class Meta(BaseManagerMeta):
+        abstract = True
+        managed = False
+
+
+class PLPGSQLFunction(View):
     _base_manager = ReadOnlyViewManager()
     objects = ReadOnlyViewManager()
 

@@ -6,7 +6,7 @@ from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
 from django.db import connection
 
-from django_pgviews.view import create_view, View, MaterializedView
+from django_pgviews.view import create_view, View, MaterializedView, PLPGSQLFunction
 from django_pgviews.signals import view_synced, all_views_synced
 
 log = logging.getLogger("django_pgviews.sync_pgviews")
@@ -79,6 +79,8 @@ class ViewSyncer(object):
                         index=view_cls._concurrent_index,
                         column_indexes=view_cls._column_indexes,
                         tenant_schema=tenant,
+                        is_function=isinstance(view_cls(), PLPGSQLFunction),
+                        function_signature=view_cls._function_signature
                     )
                     try:
                         connection.set_schema_to_public()
@@ -96,6 +98,7 @@ class ViewSyncer(object):
             except Exception as exc:
                 exc.view_cls = view_cls
                 exc.python_name = name
+                msg = "failer, skipping"
                 raise
             else:
                 if status == "CREATED":
