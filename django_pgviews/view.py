@@ -101,7 +101,7 @@ def create_view(
         # Determine if view already exists.
         if is_function:
             cursor.execute(
-                "DROP FUNCTION IF EXISTS {vtenant}.{vname}({vargs})".format(
+                "DROP FUNCTION IF EXISTS {vtenant}.{vname}({vargs}) CASCADE".format(
                     vtenant=vschema, vname=vname, vargs=function_signature
                 )
             )
